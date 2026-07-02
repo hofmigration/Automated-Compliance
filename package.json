@@ -1,0 +1,11 @@
+{
+  "name": "hubspot-contact-compliance",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Daily contact-compliance pipeline for HOF Migration (HubSpot).",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node contact-compliance.js"
+  }
+}
