@@ -17,6 +17,7 @@ async function gemini(kind, text) {
 }
 
 module.exports = async function checkEmail(d) {
+  if (!d.available.emails) return [];          // lookup broke -> stay silent
   const e = d.emails[0];
   if (!e) return [{ area: "email", problem: "No email sent", action: "send the client an email" }];
 
