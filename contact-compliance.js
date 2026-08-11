@@ -10,14 +10,14 @@
 
 const { SETTINGS, SELECTED_OWNERS, UNMATCHED_NAMES, ALL_OWNERS_SELECTED } = require("./config");
 const { hub } = require("./0-hubspot");
-const { fetchContacts, attachEngagements, dispositionMap, TERMINAL } = require("./1-fetch");
+const { fetchContacts, attachEngagements, dispositionMap, preflight, TERMINAL } = require("./1-fetch");
 const checkStage = require("./2-check-stage");
 const checkCall = require("./3-check-call");
 const checkTask = require("./4-check-task");
 const checkEmail = require("./5-check-email");
 const checkWhatsapp = require("./6-check-whatsapp");
 const checkStageMatch = require("./8-check-stage-match");
-const { composeNote, postNote } = require("./7-note");
+const { composeNote, postNote, createComplianceTask } = require("./7-note");
 
 const OWNER_NAME = Object.fromEntries(SELECTED_OWNERS.map((o) => [o.id, o.name]));
 // What loses the lead first. Lower = more important, shown in the note first.
@@ -66,6 +66,9 @@ async function main() {
   const contacts = await fetchContacts();
   console.log(`\nContacts touched yesterday: ${contacts.length}`);
 
+  // prove the activity lookups work before judging anybody
+  if (contacts.length) await preflight(contacts[0].id);
+
   const flagged = []; let skipped = 0, audited = 0;
   for (const c of contacts) {
     const stage = c.properties.lead_stage;
@@ -94,12 +97,16 @@ async function main() {
     const top = issues.slice(0, SETTINGS.MAX_ISSUES_PER_CONTACT);
 
     const ownerName = OWNER_NAME[d.ownerId] || `owner ${d.ownerId}`;
-    const note = composeNote(ownerName.split(" ")[0], top);   // script 7
+    const note = composeNote(ownerName.split(" ")[0], top, d.id);   // script 7
     flagged.push({ ...d, ownerName, top, all: issues, note });
 
     if (!SETTINGS.DRY_RUN) {
       try { await postNote(d.id, d.ownerId, note); }
       catch (e) { console.log(`note error ${d.id}: ${e.message}`); }
+      if (SETTINGS.CREATE_TASK_FOR_CONSULTANT) {
+        try { await createComplianceTask(d.id, d.ownerId, d.name, top); }
+        catch (e) { console.log(`task error ${d.id}: ${e.message}`); }
+      }
     }
   }
 
