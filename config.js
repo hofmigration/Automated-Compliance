@@ -114,6 +114,10 @@ const SETTINGS = {
   // note from the compliance lead rather than from the consultant themselves.
   NOTE_OWNER_ID: "86250521",
 
+  // Note wording. "lines" matches the notes Ali writes today (greeting, one line
+  // per issue, Thank you). "sentence" is the single-sentence version.
+  NOTE_FORMAT: "lines",
+
   // HubSpot never notifies for @mentions created by a script, so optionally
   // assign the consultant a TASK — that DOES reach their HubSpot task queue.
   CREATE_TASK_FOR_CONSULTANT: true,
@@ -138,6 +142,7 @@ const SETTINGS = {
   CHECK_STAGE_MATCH: true,     // AI: lead stage vs what the call notes actually say
   CHECK_EMAIL_SPELLING: true,  // AI: spelling / placeholders in the sent email
   CHECK_OCCUPATION: false,     // blank occupation (off — it was noisy)
+  CHECK_CALL_DESCRIPTION: true,// connected call with no description logged
 
   GEMINI_MODEL: "gemini-flash-lite-latest",
   MAX_ISSUES_PER_CONTACT: 3,
