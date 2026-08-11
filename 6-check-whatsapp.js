@@ -4,6 +4,7 @@
 const { SETTINGS } = require("./config");
 
 module.exports = async function checkWhatsapp(d) {
+  if (!d.available.whatsapps || !d.available.calls) return [];   // lookup broke -> stay silent
   const latestCall = d.calls[0];
   if (!latestCall || !latestCall.outcome) return [];    // no call, or unknown outcome -> script 3 handles it
   const skip = SETTINGS.WHATSAPP_SKIP_CALL_OUTCOMES.map((s) => s.toLowerCase());
