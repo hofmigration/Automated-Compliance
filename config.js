@@ -45,11 +45,68 @@ const OWNERS = [
   { id: "89097036",   name: "Mashal Fatima" },
 ];
 
+// ---------------------------------------------------------------------------
+// RUN-TIME SELECTION (set from the "Run workflow" dropdowns; no file editing)
+//   CONSULTANTS_INPUT — "all", or names/ids: "Ambreen, Jalal, 86887642"
+//   LEAD_STAGE_INPUT  — "all", or one stage: "No Answer"
+//   LIMIT_INPUT       — "0" for every contact, or a number to cap the run
+// ---------------------------------------------------------------------------
+const ALL_STAGES = [
+  "USA NIW", "Qualified CAN", "Qualified AUS", "Sale", "Visit Visa",
+  "Germany Opportunity Card", "Qualified Spain", "No Answer", "They Didn't Fill",
+  "Call Back", "Wrong Number", "Ineligible", "Occupation Not Listed", "Cannot Dial",
+  "Outside GCC", "Switched off", "Portugal D2/D8", "Already Migrated", "Duplicate",
+  "Started With Competitor", "Work Permit",
+];
+
+function selectOwners() {
+  // The workflow sends the four consultant dropdowns joined by "|".
+  // "- none -" placeholders are ignored; "all" anywhere means everyone.
+  const raw = (process.env.CONSULTANTS_INPUT || "all").trim();
+  const terms = raw
+    .split(/[|,]/)
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t && t !== "- none -" && t !== "none" && t !== "-");
+  if (!terms.length || terms.includes("all")) return { owners: OWNERS, unmatched: [], all: true };
+  const owners = [], unmatched = [];
+  for (const term of terms) {
+    const hits = OWNERS.filter((o) => o.name.toLowerCase() === term || o.name.toLowerCase().includes(term) || o.id === term);
+    if (!hits.length) unmatched.push(term);
+    for (const h of hits) if (!owners.some((x) => x.id === h.id)) owners.push(h);
+  }
+  return { owners, unmatched, all: false };
+}
+
+function selectStage() {
+  const raw = (process.env.LEAD_STAGE_INPUT || "all").trim();
+  if (!raw || raw.toLowerCase() === "all") return { stage: null, invalid: null };
+  const match = ALL_STAGES.find((s) => s.toLowerCase() === raw.toLowerCase());
+  return match ? { stage: match, invalid: null } : { stage: null, invalid: raw };
+}
+
+const OWNER_SELECTION = selectOwners();
+const STAGE_SELECTION = selectStage();
+
 const SETTINGS = {
-  // true = report only (no notes, no emails). Set false to go live.
-  DRY_RUN: true,
-  DRY_RUN_LIMIT: 60,    // live contacts audited per dry-run (0 = all)
-  DRY_RUN_SAMPLE: 20,   // how many flagged examples to print
+  // Dry run = safe test (report only, nothing written). Live = posts notes + sends emails.
+  // MANUAL runs: choose in the dropdown. SCHEDULED runs: use the fallback below.
+  // To make the daily 10 AM run go LIVE, change the "true" below to "false".
+  DRY_RUN: process.env.DRY_RUN_INPUT ? process.env.DRY_RUN_INPUT === "true" : true,
+
+  // Contacts to audit per run. 0 = ALL of them (no cap).
+  LIMIT: (() => {
+    const raw = (process.env.LIMIT_INPUT || "all").trim().toLowerCase();
+    if (!raw || raw === "all" || raw === "0") return 0;          // 0 = no cap
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })(),
+
+  // Only audit this lead stage (null = every live stage).
+  ONLY_STAGE: STAGE_SELECTION.stage,
+  INVALID_STAGE: STAGE_SELECTION.invalid,
+  ALL_STAGES,
+
+  PRINT_SAMPLE: 20,   // flagged examples printed in the log
 
   ALI_EMAIL: "razaali@hofmigration.com",
   FROM_EMAIL: "onboarding@resend.dev", // change to noreply@hofmigration.com after Resend domain verify
@@ -67,9 +124,14 @@ const SETTINGS = {
     "Occupation Not Listed", "They Didn't Fill",
   ],
 
+  // ----- WHICH CHECKS RUN -----
+  CHECK_STAGE_MATCH: true,     // AI: lead stage vs what the call notes actually say
+  CHECK_EMAIL_SPELLING: true,  // AI: spelling / placeholders in the sent email
+  CHECK_OCCUPATION: false,     // blank occupation (off — it was noisy)
+
   GEMINI_MODEL: "gemini-flash-lite-latest",
   MAX_ISSUES_PER_CONTACT: 3,
   TZ_OFFSET_HOURS: 5,
 };
 
-module.exports = { OWNERS, SETTINGS };
+module.exports = { OWNERS, SETTINGS, SELECTED_OWNERS: OWNER_SELECTION.owners, UNMATCHED_NAMES: OWNER_SELECTION.unmatched, ALL_OWNERS_SELECTED: OWNER_SELECTION.all };
