@@ -1,11 +1,11 @@
-// 2-check-stage.js — SCRIPT 2. Strict check of identity fields + lead stage + outcome.
-// Rules: name present, occupation present, lead stage set, and if any call is
-// logged then the outcome must also be set (outcome depends on the call).
+// 2-check-stage.js — SCRIPT 2. Lead stage + outcome must be selected.
+// (Occupation is optional — turn it on with CHECK_OCCUPATION in config.)
+const { SETTINGS } = require("./config");
+
 module.exports = function checkStage(d) {
   const issues = [];
-  if (!d.name) issues.push({ area: "stage", problem: "Contact has no name", action: "add the client name" });
-  if (!d.occupation) issues.push({ area: "stage", problem: "Occupation is blank", action: "fill in the client occupation" });
-  if (!d.leadStage) issues.push({ area: "stage", problem: "Lead stage not set", action: "update the lead stage" });
-  if (d.calls.length > 0 && !d.outcome) issues.push({ area: "stage", problem: "Call logged but outcome not marked", action: "mark the outcome" });
+  if (!d.leadStage) issues.push({ area: "stage", problem: "No lead stage selected", action: "update the lead stage" });
+  if (!d.outcome && d.calls.length > 0) issues.push({ area: "outcome", problem: "No outcome selected", action: "select the outcome" });
+  if (SETTINGS.CHECK_OCCUPATION && !d.occupation) issues.push({ area: "data", problem: "Occupation is blank", action: "fill in the client occupation" });
   return issues;
 };
