@@ -1,7 +1,7 @@
 // 1-fetch.js — SCRIPT 1. Finds yesterday's touched contacts for the monitored
 // consultants, skips dead/closed stages, and attaches every engagement
 // (calls, emails, tasks, whatsapps) so the check scripts can judge them.
-const { hub, assocIds, batchRead, newestFirst, strip } = require("./0-hubspot");
+const { hub, assocIds, batchRead, preflight, newestFirst, strip } = require("./0-hubspot");
 const { SETTINGS, SELECTED_OWNERS } = require("./config");
 
 const OWNER_IDS = SELECTED_OWNERS.map((o) => o.id);
@@ -61,17 +61,26 @@ async function fetchContacts() {
 }
 
 async function attachEngagements(c, dispoMap) {
-  const [callIds, emailIds, taskIds, commIds] = await Promise.all([
+  const [callA, emailA, taskA, commA] = await Promise.all([
     assocIds(c.id, "calls"), assocIds(c.id, "emails"), assocIds(c.id, "tasks"), assocIds(c.id, "communications"),
   ]);
-  const [calls, emails, tasks, comms] = await Promise.all([
-    batchRead("calls", callIds, ["hs_call_body", "hs_call_title", "hs_call_disposition", "hs_timestamp"]),
-    batchRead("emails", emailIds, ["hs_email_subject", "hs_email_text", "hs_email_html", "hs_timestamp", "hs_email_direction"]),
-    batchRead("tasks", taskIds, ["hs_task_subject", "hs_task_status", "hs_timestamp"]),
-    batchRead("communications", commIds, ["hs_communication_channel_type", "hs_communication_body", "hs_timestamp"]),
+  const [callR, emailR, taskR, commR] = await Promise.all([
+    batchRead("calls", callA.ids, ["hs_call_body", "hs_call_title", "hs_call_disposition", "hs_timestamp"]),
+    batchRead("emails", emailA.ids, ["hs_email_subject", "hs_email_text", "hs_email_html", "hs_timestamp", "hs_email_direction"]),
+    batchRead("tasks", taskA.ids, ["hs_task_subject", "hs_task_status", "hs_timestamp"]),
+    batchRead("communications", commA.ids, ["hs_communication_channel_type", "hs_communication_body", "hs_timestamp"]),
   ]);
+  const calls = callR.records, emails = emailR.records, tasks = taskR.records, comms = commR.records;
+  // did each lookup actually work? checks must stay quiet when it did not
+  const available = {
+    calls: callA.ok && callR.ok,
+    emails: emailA.ok && emailR.ok,
+    tasks: taskA.ok && taskR.ok,
+    whatsapps: commA.ok && commR.ok,
+  };
   const p = c.properties;
   return {
+    available,
     id: c.id,
     name: [p.firstname, p.lastname].filter(Boolean).join(" ").trim(),
     ownerId: p.hubspot_owner_id,
@@ -89,4 +98,4 @@ async function attachEngagements(c, dispoMap) {
   };
 }
 
-module.exports = { fetchContacts, attachEngagements, dispositionMap, TERMINAL };
+module.exports = { fetchContacts, attachEngagements, dispositionMap, preflight, TERMINAL };
