@@ -97,11 +97,11 @@ async function main() {
     const top = issues.slice(0, SETTINGS.MAX_ISSUES_PER_CONTACT);
 
     const ownerName = OWNER_NAME[d.ownerId] || `owner ${d.ownerId}`;
-    const note = composeNote(ownerName.split(" ")[0], top, d.id);   // script 7
+    const note = composeNote(ownerName, top);   // script 7
     flagged.push({ ...d, ownerName, top, all: issues, note });
 
     if (!SETTINGS.DRY_RUN) {
-      try { await postNote(d.id, d.ownerId, note); }
+      try { await postNote(d.id, d.ownerId, ownerName, top); }
       catch (e) { console.log(`note error ${d.id}: ${e.message}`); }
       if (SETTINGS.CREATE_TASK_FOR_CONSULTANT) {
         try { await createComplianceTask(d.id, d.ownerId, d.name, top); }
