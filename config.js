@@ -109,6 +109,16 @@ const SETTINGS = {
   PRINT_SAMPLE: 20,   // flagged examples printed in the log
 
   ALI_EMAIL: "razaali@hofmigration.com",
+
+  // The compliance note is posted as ALI (owner id 86250521), so it reads as a
+  // note from the compliance lead rather than from the consultant themselves.
+  NOTE_OWNER_ID: "86250521",
+
+  // HubSpot never notifies for @mentions created by a script, so optionally
+  // assign the consultant a TASK — that DOES reach their HubSpot task queue.
+  CREATE_TASK_FOR_CONSULTANT: true,
+  TASK_PREFIX: "[Compliance]",        // our tasks are ignored by 4-check-task.js
+  TASK_DUE_IN_HOURS: 24,
   FROM_EMAIL: "onboarding@resend.dev", // change to noreply@hofmigration.com after Resend domain verify
   PORTAL_ID: "23735726",
 
