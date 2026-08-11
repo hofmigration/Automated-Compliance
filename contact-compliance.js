@@ -8,7 +8,7 @@
 //
 // SAFE MODE: DRY_RUN=true prints everything, posts/sends nothing.
 
-const { OWNERS, SETTINGS } = require("./config");
+const { SETTINGS, SELECTED_OWNERS, UNMATCHED_NAMES, ALL_OWNERS_SELECTED } = require("./config");
 const { hub } = require("./0-hubspot");
 const { fetchContacts, attachEngagements, dispositionMap, TERMINAL } = require("./1-fetch");
 const checkStage = require("./2-check-stage");
@@ -16,10 +16,12 @@ const checkCall = require("./3-check-call");
 const checkTask = require("./4-check-task");
 const checkEmail = require("./5-check-email");
 const checkWhatsapp = require("./6-check-whatsapp");
+const checkStageMatch = require("./8-check-stage-match");
 const { composeNote, postNote } = require("./7-note");
 
-const OWNER_NAME = Object.fromEntries(OWNERS.map((o) => [o.id, o.name]));
-const PRIORITY = { call: 1, email: 2, whatsapp: 3, stage: 4, task: 5 };
+const OWNER_NAME = Object.fromEntries(SELECTED_OWNERS.map((o) => [o.id, o.name]));
+// What loses the lead first. Lower = more important, shown in the note first.
+const PRIORITY = { stagematch: 1, call: 2, stage: 3, outcome: 4, email: 5, task: 6, whatsapp: 7, data: 8 };
 
 async function ownerEmailMap() {
   const map = {}; let after;
@@ -44,15 +46,32 @@ async function main() {
   if (!process.env.HUBSPOT_TOKEN) throw new Error("Missing HUBSPOT_TOKEN");
   console.log(`=== HOF Contact Compliance pipeline — ${new Date().toISOString()} ===  DRY_RUN=${SETTINGS.DRY_RUN}`);
 
+  // ---- what this run is doing ----
+  if (SETTINGS.INVALID_STAGE) {
+    console.log(`\nERROR: "${SETTINGS.INVALID_STAGE}" is not a lead stage. Use "all" or one of:`);
+    SETTINGS.ALL_STAGES.forEach((s) => console.log(`  - ${s}`));
+    return;
+  }
+  if (!SELECTED_OWNERS.length) {
+    console.log(`\nERROR: none of the names you entered matched a consultant. Nothing was audited.`);
+    if (UNMATCHED_NAMES.length) console.log(`Not found: ${UNMATCHED_NAMES.join(", ")}`);
+    return;
+  }
+  if (UNMATCHED_NAMES.length) console.log(`NOTE: no consultant matched: ${UNMATCHED_NAMES.join(", ")}`);
+  console.log(`Consultants: ${ALL_OWNERS_SELECTED ? `ALL (${SELECTED_OWNERS.length})` : SELECTED_OWNERS.map((o) => o.name).join(", ")}`);
+  console.log(`Lead stage:  ${SETTINGS.ONLY_STAGE || "all live stages"}`);
+  console.log(`Limit:       ${SETTINGS.LIMIT === 0 ? "no limit (every contact)" : SETTINGS.LIMIT}`);
+
   const dispoMap = await dispositionMap();
   const contacts = await fetchContacts();
-  console.log(`Contacts touched yesterday (${OWNERS.length} consultants): ${contacts.length}`);
+  console.log(`\nContacts touched yesterday: ${contacts.length}`);
 
   const flagged = []; let skipped = 0, audited = 0;
   for (const c of contacts) {
     const stage = c.properties.lead_stage;
-    if (stage && TERMINAL.includes(String(stage).toLowerCase())) { skipped++; continue; }
-    if (SETTINGS.DRY_RUN && SETTINGS.DRY_RUN_LIMIT && audited >= SETTINGS.DRY_RUN_LIMIT) break;
+    // a stage you picked on purpose is always audited, even if it is a closed stage
+    if (!SETTINGS.ONLY_STAGE && stage && TERMINAL.includes(String(stage).toLowerCase())) { skipped++; continue; }
+    if (SETTINGS.LIMIT && audited >= SETTINGS.LIMIT) break;
     audited++;
 
     let d;
@@ -67,6 +86,7 @@ async function main() {
       issues = issues.concat(checkTask(d));           // script 4
       issues = issues.concat(await checkEmail(d));    // script 5
       issues = issues.concat(await checkWhatsapp(d)); // script 6
+      issues = issues.concat(await checkStageMatch(d));// script 8
     } catch (e) { console.log(`check error ${c.id}: ${e.message}`); }
 
     if (!issues.length) continue;
@@ -94,8 +114,8 @@ async function main() {
   console.log(`Scanned ${contacts.length} | skipped (closed stages) ${skipped} | audited ${audited} | FLAGGED ${flagged.length}`);
   console.log(`\nIssues by type:`); for (const [p, n] of desc(perProblem)) console.log(`  ${String(n).padStart(4)}  ${p}`);
   console.log(`\nFlagged per consultant:`); for (const [o, n] of desc(perOwner)) console.log(`  ${String(n).padStart(4)}  ${o}`);
-  console.log(`\nSample (first ${SETTINGS.DRY_RUN_SAMPLE}):`);
-  for (const f of flagged.slice(0, SETTINGS.DRY_RUN_SAMPLE)) {
+  console.log(`\nSample (first ${SETTINGS.PRINT_SAMPLE}):`);
+  for (const f of flagged.slice(0, SETTINGS.PRINT_SAMPLE)) {
     console.log(`\n• ${f.ownerName} — ${f.name || f.id}`);
     console.log(`  note:   ${f.note}`);
     console.log(`  issues: ${f.all.map((i) => i.problem).join("; ")}`);
