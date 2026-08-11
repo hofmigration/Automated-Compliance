@@ -1,31 +1,25 @@
 // 7-note.js — SCRIPT 7. Writes the compliance note and posts it.
 //
-// THREE things this handles:
-//  1. The note is OWNED BY ALI (not the consultant), so it reads as a note from
-//     the compliance lead, not something the consultant wrote to themselves.
-//  2. The consultant is recorded as @mentioned on the note.
-//     NOTE: HubSpot does NOT send notifications for mentions made via API, so a
-//     mention alone will never reach them. That is what the task below is for.
-//  3. Optionally assigns the consultant a TASK, which DOES land in their HubSpot
-//     task queue — the only reliable in-HubSpot way to make sure they see it.
+// THE MENTION: HubSpot only renders a REAL tag (blue, clickable) when the body
+// contains its mention markup. A plain "@name" is just text. Copied exactly from
+// the notes in this portal:
+//   <span data-mention-id="475397717" data-mention-name="Thushara M S"
+//         style="color: #425b76;font-weight: 600;">@Thushara M S</span>
 //
-// Wording follows Ali's style, with slight natural variation so 20 notes in a row
-// do not look copy-pasted:
-//   "Hi @ayesha hope you are well. Kindly update the lead stage and also set up
-//    the next task for further follow up. thank you."
+// The note is OWNED BY ALI so it reads "Note by Ali Raza".
+//
+// HubSpot still does not NOTIFY for mentions created via API (their docs confirm),
+// so the assigned task below is what actually reaches the consultant.
 const { hub } = require("./0-hubspot");
 const { SETTINGS } = require("./config");
 
-const OPENERS = [
-  "hope you are well",
-  "hope you are doing well",
-  "hope all is well",
-  "hope you are well today",
-];
-const VERBS = ["Kindly", "Kindly", "Please kindly", "Please"];
+const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-// stable per contact: the same contact always gets the same wording
-const pick = (arr, seed) => arr[Math.abs(Number(String(seed).slice(-6)) || 0) % arr.length];
+// the real HubSpot mention markup — this is what makes it an actual tag
+function mentionHtml(ownerId, fullName) {
+  const n = esc(fullName);
+  return `<strong><span data-mention-id="${esc(ownerId)}" data-mention-name="${n}" style="color: #425b76;font-weight: 600;">@${n}</span></strong>`;
+}
 
 function joinActions(actions) {
   if (actions.length === 1) return actions[0];
@@ -33,28 +27,47 @@ function joinActions(actions) {
   return `${actions.slice(0, -1).join(", ")} and also ${actions[actions.length - 1]}`;
 }
 
-function composeNote(ownerFirstName, issues, contactId = "0") {
-  const first = (ownerFirstName || "there").toLowerCase();
+// Builds the note body. Two formats, both matching notes Ali actually writes:
+//   "lines"    -> greeting, then one line per issue, then Thank you   (his current style)
+//   "sentence" -> "Hi @name hope you are well. Kindly x and also y. thank you."
+function buildNoteHtml(ownerId, fullName, issues) {
+  const P = (inner) => `<p style="margin:0;">${inner}</p>`;
+  const mention = mentionHtml(ownerId, fullName);
+
+  if ((SETTINGS.NOTE_FORMAT || "lines") === "sentence") {
+    const actions = [...new Set(issues.map((i) => i.action))];
+    return `<div style="" dir="auto" data-top-level="true">${P(`Hi ${mention} hope you are well. Kindly ${joinActions(actions)}. thank you.`)}</div>`;
+  }
+
+  const lines = [P(`Hi ${mention}`)];
   const actions = [...new Set(issues.map((i) => i.action))];
-  return `Hi @${first} ${pick(OPENERS, contactId)}. ${pick(VERBS, contactId)} ${joinActions(actions)}. thank you.`;
+  actions.forEach((a, i) => lines.push(P(esc(i === 0 ? `Kindly ${a}` : `Also ${a}`))));
+  lines.push(P("Thank you"));
+  return `<div style="" dir="auto" data-top-level="true">${lines.join("")}</div>`;
 }
 
-async function postNote(contactId, consultantOwnerId, noteText) {
+// plain text version, for the log and the emails
+function composeNote(fullName, issues) {
+  const actions = [...new Set(issues.map((i) => i.action))];
+  if ((SETTINGS.NOTE_FORMAT || "lines") === "sentence")
+    return `Hi @${fullName} hope you are well. Kindly ${joinActions(actions)}. thank you.`;
+  return `Hi @${fullName} | ` + actions.map((a, i) => (i === 0 ? `Kindly ${a}` : `Also ${a}`)).join(" | ") + " | Thank you";
+}
+
+async function postNote(contactId, consultantOwnerId, consultantFullName, issues) {
   await hub("POST", "/crm/v3/objects/notes", {
     properties: {
       hs_timestamp: new Date().toISOString(),
-      hs_note_body: `<div>${noteText}</div>`,
-      // the note belongs to Ali (the compliance lead), not the consultant
-      hubspot_owner_id: String(SETTINGS.NOTE_OWNER_ID),
-      // records the consultant as mentioned (does not notify — see header)
-      hs_at_mentioned_owner_ids: String(consultantOwnerId),
+      hs_note_body: buildNoteHtml(consultantOwnerId, consultantFullName, issues),
+      hubspot_owner_id: String(SETTINGS.NOTE_OWNER_ID),          // note is from Ali
+      hs_at_mentioned_owner_ids: String(consultantOwnerId),      // harmless extra
     },
     associations: [{ to: { id: String(contactId) }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 202 }] }],
   });
 }
 
-// Assigns the consultant a task so it appears in their HubSpot task queue.
-// Prefixed so our own task check never counts it as their follow-up task.
+// Assigns the consultant a task — this DOES appear in their HubSpot task queue.
+// Prefixed so 4-check-task.js never counts it as their follow-up task.
 async function createComplianceTask(contactId, consultantOwnerId, contactName, issues) {
   const actions = [...new Set(issues.map((i) => i.action))];
   const due = new Date(Date.now() + SETTINGS.TASK_DUE_IN_HOURS * 3600 * 1000);
@@ -66,10 +79,10 @@ async function createComplianceTask(contactId, consultantOwnerId, contactName, i
       hs_task_status: "NOT_STARTED",
       hs_task_priority: "HIGH",
       hs_task_type: "TODO",
-      hubspot_owner_id: String(consultantOwnerId),   // assigned TO the consultant
+      hubspot_owner_id: String(consultantOwnerId),
     },
     associations: [{ to: { id: String(contactId) }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 204 }] }],
   });
 }
 
-module.exports = { composeNote, postNote, createComplianceTask };
+module.exports = { composeNote, buildNoteHtml, postNote, createComplianceTask };
