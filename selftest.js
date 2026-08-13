@@ -34,7 +34,12 @@ const good = (o = {}) => ({
   ...o,
 });
 
-// [ name, contact, must-flag substring (null = must be clean), notes ]
+// [ name, contact, expectation ]
+//   null        -> must produce NO issues at all
+//   "text"      -> must produce an issue containing "text"
+//   "!text"     -> must NOT produce any issue containing "text" (others allowed)
+//   "SKIP"      -> contact is skipped before checks (deal)
+//   "AI-SKIP"   -> needs GEMINI_KEY, skipped without one
 const SCENARIOS = [
   // --- baseline ---
   ["compliant contact produces nothing", good(), null],
@@ -59,6 +64,22 @@ const SCENARIOS = [
   ["call 10 days ago is stale", good({ calls: [{ outcome: "Connected", when: now - 10 * DAY, note: "spoke" }] }), "Not called recently"],
   ["logged call with no call outcome", good({ calls: [{ outcome: "", when: now, note: "spoke" }] }), "no call outcome"],
   ["connected call with no description", good({ calls: [{ outcome: "Connected", when: now, note: "" }] }), "no description"],
+
+  // --- call quality must only judge RECENT calls (Mishal Naseem case) ---
+  ["busy + no answer yesterday, old connected call: no description ask",
+    good({ calls: [
+      { outcome: "No answer", when: now - DAY, note: "NA" },
+      { outcome: "Busy", when: now - DAY, note: "Call id : 0c809ecf" },
+      { outcome: "Connected", when: now - 30 * DAY, note: "" },
+    ] }), "!no description"],
+  ["busy call today needs no description", good({ calls: [{ outcome: "Busy", when: now, note: "" }], whatsapps: [{ when: now, body: "Hello sir" }] }), null],
+  ["no answer call today needs no description", good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now, note: "NA" }], whatsapps: [{ when: now, body: "Hello sir" }] }), null],
+  ["connected call today with no description IS flagged", good({ calls: [{ outcome: "Connected", when: now, note: "" }] }), "no description"],
+  ["connected call with only \"NA\" is not a description", good({ calls: [{ outcome: "Connected", when: now, note: "NA" }] }), "no description"],
+  ["meeting booked needs a description too", good({ calls: [{ outcome: "Meeting booked", when: now, note: "" }] }), "no description"],
+  ["meeting booked needs no whatsapp", good({ calls: [{ outcome: "Meeting booked", when: now, note: "client agreed to a zoom on friday" }], whatsapps: [] }), null],
+  ["old call with no outcome is not flagged today",
+    good({ calls: [{ outcome: "Connected", when: now, note: "spoke at length" }, { outcome: "", when: now - 40 * DAY, note: "old" }] }), null],
 
   // --- task ---
   ["no task set up", good({ tasks: [] }), "No task set up"],
@@ -118,12 +139,17 @@ const SCENARIOS = [
     issues.sort((a, b) => (PRIORITY[a.area] || 9) - (PRIORITY[b.area] || 9));
     const text = issues.map((i) => i.problem).join("; ");
 
-    const ok = must === null ? issues.length === 0 : text.toLowerCase().includes(String(must).toLowerCase());
+    let ok;
+    if (must === null) ok = issues.length === 0;
+    else if (String(must).startsWith("!")) ok = !text.toLowerCase().includes(String(must).slice(1).toLowerCase());
+    else ok = text.toLowerCase().includes(String(must).toLowerCase());
     if (ok) { pass++; console.log(`PASS  ${label}`); }
     else {
       fail++;
       console.log(`FAIL  ${label}`);
-      console.log(`        expected: ${must === null ? "no issues" : `an issue containing "${must}"`}`);
+      console.log(`        expected: ${must === null ? "no issues"
+        : String(must).startsWith("!") ? `NO issue containing "${String(must).slice(1)}"`
+        : `an issue containing "${must}"`}`);
       console.log(`        got:      ${text || "(no issues)"}`);
     }
   }
