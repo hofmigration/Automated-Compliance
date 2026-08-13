@@ -73,8 +73,16 @@ async function preflight(sampleContactId) {
   return status;
 }
 
+// Calendar-day distance in PKT: 0 = today, 1 = yesterday, 2+ = older.
+function daysAgoPkt(ms, tzOffsetHours = 5) {
+  if (!ms) return Infinity;
+  const off = tzOffsetHours * 3600 * 1000;
+  const dayOf = (t) => Math.floor((t + off) / 86400000);
+  return dayOf(Date.now()) - dayOf(ms);
+}
+
 const newestFirst = (a) => a.slice().sort((x, y) => Date.parse(y.properties.hs_timestamp || 0) - Date.parse(x.properties.hs_timestamp || 0));
 const strip = (h) => (h || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const urls = (h) => (h || "").match(/https?:\/\/[^\s"'<>)]+/gi) || [];
 
-module.exports = { hub, assocIds, batchRead, preflight, newestFirst, strip, urls };
+module.exports = { hub, assocIds, batchRead, preflight, newestFirst, strip, urls, daysAgoPkt };
