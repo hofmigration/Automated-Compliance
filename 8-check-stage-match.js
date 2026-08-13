@@ -19,8 +19,9 @@ const NOT_REACHED = ["no answer", "switched off", "cannot dial"];
 
 module.exports = async function checkStageMatch(d) {
   if (!SETTINGS.CHECK_STAGE_MATCH || !process.env.GEMINI_KEY) return [];
+  if (!d.leadStage) return [];                                   // stage first (script 2)
   const notes = d.calls.map((c) => c.note).filter((n) => n && n.length > 15);
-  if (!notes.length || !d.leadStage) return [];
+  if (!notes.length) return [];
 
   const stage = String(d.leadStage).toLowerCase();
   const outcomes = d.calls.map((c) => c.outcome).filter(Boolean).join(", ");
