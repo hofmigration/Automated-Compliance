@@ -61,8 +61,9 @@ async function fetchContacts() {
 }
 
 async function attachEngagements(c, dispoMap) {
-  const [callA, emailA, taskA, commA] = await Promise.all([
+  const [callA, emailA, taskA, commA, dealA] = await Promise.all([
     assocIds(c.id, "calls"), assocIds(c.id, "emails"), assocIds(c.id, "tasks"), assocIds(c.id, "communications"),
+    assocIds(c.id, "deals"),
   ]);
   const [callR, emailR, taskR, commR] = await Promise.all([
     batchRead("calls", callA.ids, ["hs_call_body", "hs_call_title", "hs_call_disposition", "hs_timestamp"]),
@@ -77,10 +78,13 @@ async function attachEngagements(c, dispoMap) {
     emails: emailA.ok && emailR.ok,
     tasks: taskA.ok && taskR.ok,
     whatsapps: commA.ok && commR.ok,
+    deals: dealA.ok,
   };
   const p = c.properties;
   return {
     available,
+    dealCount: dealA.ids.length,
+    hasDeal: dealA.ok && dealA.ids.length > 0,
     id: c.id,
     name: [p.firstname, p.lastname].filter(Boolean).join(" ").trim(),
     ownerId: p.hubspot_owner_id,
