@@ -105,6 +105,11 @@ on:
           - "Muhammad Hanzla"
           - "Muhammad Awaad"
           - "Mashal Fatima"
+          - "Haleema Umar"
+          - "Rida Faisal"
+          - "Janice Noronha"
+          - "Insha Ali"
+          - "Uzma Qamar"
       consultant_2:
         description: "Also audit (optional)"
         required: false
@@ -154,6 +159,11 @@ on:
           - "Muhammad Hanzla"
           - "Muhammad Awaad"
           - "Mashal Fatima"
+          - "Haleema Umar"
+          - "Rida Faisal"
+          - "Janice Noronha"
+          - "Insha Ali"
+          - "Uzma Qamar"
       consultant_3:
         description: "Also audit (optional)"
         required: false
@@ -203,6 +213,11 @@ on:
           - "Muhammad Hanzla"
           - "Muhammad Awaad"
           - "Mashal Fatima"
+          - "Haleema Umar"
+          - "Rida Faisal"
+          - "Janice Noronha"
+          - "Insha Ali"
+          - "Uzma Qamar"
       consultant_4:
         description: "Also audit (optional)"
         required: false
@@ -252,6 +267,11 @@ on:
           - "Muhammad Hanzla"
           - "Muhammad Awaad"
           - "Mashal Fatima"
+          - "Haleema Umar"
+          - "Rida Faisal"
+          - "Janice Noronha"
+          - "Insha Ali"
+          - "Uzma Qamar"
 
 jobs:
   audit:
@@ -261,7 +281,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
+      # Rules gate: if any agreed rule has stopped working, stop before posting anything.
+      - name: Check the compliance rules still work
+        run: node selftest.js
       - run: node contact-compliance.js
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
