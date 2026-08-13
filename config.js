@@ -133,9 +133,16 @@ const SETTINGS = {
   FROM_EMAIL: "onboarding@resend.dev", // change to noreply@hofmigration.com after Resend domain verify
   PORTAL_ID: "23735726",
 
-  // WhatsApp required after a call unless the outcome is one of these:
-  WHATSAPP_SKIP_CALL_OUTCOMES: ["Connected"],
+  // Your portal's call outcomes: Busy, Connected, Left live message,
+  // Left voicemail, Meeting booked, No answer, Wrong number.
+
+  // WhatsApp required after a call UNLESS the client was actually reached:
+  WHATSAPP_SKIP_CALL_OUTCOMES: ["Connected", "Meeting booked"],
   WHATSAPP_DELAY_HOURS: 24,
+
+  // A call description is only expected when there was a real conversation.
+  // Busy / No answer / Left voicemail / Wrong number need no description.
+  CALL_DESCRIPTION_REQUIRED_OUTCOMES: ["Connected", "Meeting booked"],
 
   // Closed/dead stages — skipped entirely. NOTE: these are the INTERNAL values
   // (e.g. "Call Back" is the internal value of "Schedule Call Back").
