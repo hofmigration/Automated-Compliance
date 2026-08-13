@@ -19,7 +19,14 @@ async function gemini(kind, text) {
 module.exports = async function checkEmail(d) {
   if (!d.available.emails) return [];          // lookup broke -> stay silent
   const e = d.emails[0];
-  if (!e) return [{ area: "email", problem: "No email sent", action: "send the client an email" }];
+
+  // Rule: the email is expected once a call has been logged. If no call exists,
+  // script 3 asks them to call — asking for both at once just piles on.
+  if (!e) {
+    if (d.available.calls && d.calls.length > 0)
+      return [{ area: "email", problem: "Call logged but no email sent", action: "send the client an email" }];
+    return [];
+  }
 
   const issues = [];
   const raw = e.hs_email_html || e.hs_email_text || "";
@@ -28,8 +35,14 @@ module.exports = async function checkEmail(d) {
   if (/\{\{|\}\}|\[first ?name\]|\[name\]|%[a-z_]+%/i.test(subject))
     issues.push({ area: "email", problem: "Unfilled placeholder in email subject", action: "correct the placeholder in the email subject" });
 
-  const m = strip(raw).match(/\b(hi|hello|dear)\b[\s,!]*([A-Za-z]*)/i);
-  if (m && (!m[2] || m[2].length < 2))
+  // Greeting must contain the CLIENT'S name. The old version grabbed whatever word
+  // followed "Hi" and assumed it was a name, so "Hi, please find details" passed.
+  // Now it looks for a real part of the contact's name near the greeting.
+  const head = strip(raw).slice(0, 90);
+  const greeted = /\b(hi|hello|dear|good\s+(morning|afternoon|evening))\b/i.test(head);
+  const nameTokens = String(d.name || "").split(/\s+/).filter((t) => t.replace(/[^A-Za-z]/g, "").length >= 3)
+    .map((t) => t.toLowerCase().replace(/[^a-z]/g, ""));
+  if (greeted && nameTokens.length && !nameTokens.some((t) => head.toLowerCase().includes(t)))
     issues.push({ area: "email", problem: "Email greeting has no client name", action: "add the client name in the email greeting" });
 
   if (SETTINGS.CHECK_EMAIL_SPELLING) {
