@@ -14,6 +14,7 @@ const STANDARD_DISPOSITIONS = {
   "f240bbac-87c9-4f6e-bf70-924b57d47db7": "Connected",
   "a4c4c377-d246-4b32-a13b-75a56a4cd0ff": "Left live message",
   "b2cf5968-551e-4856-9783-52b3da59a7d0": "Left voicemail",
+  "2e7360c1-6b71-40e9-ab2b-30ae98a4678c": "Meeting booked",
   "73a0d17f-1163-4015-bdd5-ec830791da20": "No answer",
   "17b47fee-58de-441e-a44c-c6300d46f273": "Wrong number",
 };
