@@ -69,7 +69,7 @@ async function main() {
   // prove the activity lookups work before judging anybody
   if (contacts.length) await preflight(contacts[0].id);
 
-  const flagged = []; let skipped = 0, audited = 0;
+  const flagged = []; let skipped = 0, audited = 0, withDeal = 0;
   for (const c of contacts) {
     const stage = c.properties.lead_stage;
     // a stage you picked on purpose is always audited, even if it is a closed stage
@@ -80,6 +80,9 @@ async function main() {
     let d;
     try { d = await attachEngagements(c, dispoMap); }
     catch (e) { console.log(`fetch error ${c.id}: ${e.message}`); continue; }
+
+    // A deal exists on this contact, so follow-ups belong on the deal, not here.
+    if (d.hasDeal) { withDeal++; audited--; continue; }
 
     // ---- the chain: each script adds its findings ----
     let issues = [];
@@ -118,7 +121,7 @@ async function main() {
   }
   const desc = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]);
   console.log(`\n===== SUMMARY =====`);
-  console.log(`Scanned ${contacts.length} | skipped (closed stages) ${skipped} | audited ${audited} | FLAGGED ${flagged.length}`);
+  console.log(`Scanned ${contacts.length} | skipped: closed stage ${skipped}, has a deal ${withDeal} | audited ${audited} | FLAGGED ${flagged.length}`);
   console.log(`\nIssues by type:`); for (const [p, n] of desc(perProblem)) console.log(`  ${String(n).padStart(4)}  ${p}`);
   console.log(`\nFlagged per consultant:`); for (const [o, n] of desc(perOwner)) console.log(`  ${String(n).padStart(4)}  ${o}`);
   console.log(`\nSample (first ${SETTINGS.PRINT_SAMPLE}):`);
