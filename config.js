@@ -43,6 +43,13 @@ const OWNERS = [
   { id: "90507249",   name: "Muhammad Hanzla" },
   { id: "90507250",   name: "Muhammad Awaad" },
   { id: "89097036",   name: "Mashal Fatima" },
+  { id: "95715299",   name: "Haleema Umar" },
+  { id: "94388823",   name: "Rida Faisal" },
+  { id: "96753780",   name: "Janice Noronha" },
+  // These two are new HubSpot users whose names are BLANK in HubSpot. The names
+  // below are used for the @mention, but their HubSpot profiles should be completed.
+  { id: "97131926",   name: "Insha Ali" },
+  { id: "97131963",   name: "Uzma Qamar" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -143,6 +150,11 @@ const SETTINGS = {
   CHECK_EMAIL_SPELLING: true,  // AI: spelling / placeholders in the sent email
   CHECK_OCCUPATION: false,     // blank occupation (off — it was noisy)
   CHECK_CALL_DESCRIPTION: true,// connected call with no description logged
+  CHECK_WHATSAPP_SPELLING: false,// spelling mistakes in the WhatsApp follow-up (OFF)
+
+  // Ask the consultant to call when the last logged call is this many calendar
+  // days old. 2 = today and yesterday are fine, 2 days ago or older is not.
+  CALL_STALE_AFTER_DAYS: 2,
 
   GEMINI_MODEL: "gemini-flash-lite-latest",
   MAX_ISSUES_PER_CONTACT: 3,
