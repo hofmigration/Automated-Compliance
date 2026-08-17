@@ -59,7 +59,8 @@ async function main() {
   }
   if (UNMATCHED_NAMES.length) console.log(`NOTE: no consultant matched: ${UNMATCHED_NAMES.join(", ")}`);
   console.log(`Consultants: ${ALL_OWNERS_SELECTED ? `ALL (${SELECTED_OWNERS.length})` : SELECTED_OWNERS.map((o) => o.name).join(", ")}`);
-  console.log(`Lead stage:  ${SETTINGS.ONLY_STAGE || "all live stages"}`);
+  console.log(`Window:      ${SETTINGS.AUDIT_WINDOW === "yesterday" ? "yesterday" : SETTINGS.AUDIT_WINDOW === "today" ? "today so far" : `last ${SETTINGS.AUDIT_WINDOW} days`}`);
+  console.log(`Lead stage:  ${SETTINGS.ONLY_STAGE_BLANK ? "(not marked) — contacts with activity but no lead stage" : SETTINGS.ONLY_STAGE || "all live stages"}`);
   console.log(`Limit:       ${SETTINGS.LIMIT === 0 ? "no limit (every contact)" : SETTINGS.LIMIT}`);
 
   const dispoMap = await dispositionMap();
@@ -70,10 +71,11 @@ async function main() {
   if (contacts.length) await preflight(contacts[0].id);
 
   const flagged = []; let skipped = 0, audited = 0, withDeal = 0;
+  let waSeen = 0, waExpected = 0;   // for the WhatsApp sanity net
   for (const c of contacts) {
     const stage = c.properties.lead_stage;
     // a stage you picked on purpose is always audited, even if it is a closed stage
-    if (!SETTINGS.ONLY_STAGE && stage && TERMINAL.includes(String(stage).toLowerCase())) { skipped++; continue; }
+    if (!SETTINGS.ONLY_STAGE && !SETTINGS.ONLY_STAGE_BLANK && stage && TERMINAL.includes(String(stage).toLowerCase())) { skipped++; continue; }
     if (SETTINGS.LIMIT && audited >= SETTINGS.LIMIT) break;
     audited++;
 
@@ -83,6 +85,10 @@ async function main() {
 
     // A deal exists on this contact, so follow-ups belong on the deal, not here.
     if (d.hasDeal) { withDeal++; audited--; continue; }
+
+    waSeen += (d.whatsapps || []).length;
+    const lc = d.calls[0];
+    if (lc && lc.outcome && !SETTINGS.WHATSAPP_SKIP_CALL_OUTCOMES.map((x) => x.toLowerCase()).includes(String(lc.outcome).toLowerCase())) waExpected++;
 
     // ---- the chain: each script adds its findings ----
     let issues = [];
@@ -111,6 +117,24 @@ async function main() {
         catch (e) { console.log(`task error ${d.id}: ${e.message}`); }
       }
     }
+  }
+
+  // ---- WhatsApp sanity net: never accuse when we clearly cannot see WhatsApp ----
+  let waSuppressed = 0;
+  if (SETTINGS.WHATSAPP_SANITY_NET && waSeen === 0 && waExpected >= 5) {
+    for (const f of flagged) {
+      const before = f.all.length;
+      f.all = f.all.filter((i) => !(i.area === "whatsapp" && /no WhatsApp logged/i.test(i.problem)));
+      f.top = f.top.filter((i) => !(i.area === "whatsapp" && /no WhatsApp logged/i.test(i.problem)));
+      waSuppressed += before - f.all.length;
+      f.note = f.top.length ? composeNote(f.ownerName, f.top) : "";
+    }
+    const still = flagged.filter((f) => f.top.length);
+    flagged.length = 0; flagged.push(...still);
+    console.log(`\n!! WHATSAPP NOT VISIBLE: 0 WhatsApp messages were read across ${audited} contacts,`);
+    console.log(`   but ${waExpected} of them had a call where the client was not reached.`);
+    console.log(`   ${waSuppressed} "no WhatsApp logged" finding(s) were DROPPED so nobody is wrongly asked.`);
+    console.log(`   Check the private app can read Communications, then re-run.`);
   }
 
   // ---- summary ----
