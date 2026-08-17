@@ -86,9 +86,13 @@ function selectOwners() {
 
 function selectStage() {
   const raw = (process.env.LEAD_STAGE_INPUT || "all").trim();
-  if (!raw || raw.toLowerCase() === "all") return { stage: null, invalid: null };
-  const match = ALL_STAGES.find((s) => s.toLowerCase() === raw.toLowerCase());
-  return match ? { stage: match, invalid: null } : { stage: null, invalid: raw };
+  const low = raw.toLowerCase();
+  if (!raw || low === "all") return { stage: null, blank: false, invalid: null };
+  // audit contacts that have activity but NO lead stage marked
+  if (low === "(not marked)" || low === "not marked" || low === "blank" || low === "none")
+    return { stage: null, blank: true, invalid: null };
+  const match = ALL_STAGES.find((s) => s.toLowerCase() === low);
+  return match ? { stage: match, blank: false, invalid: null } : { stage: null, blank: false, invalid: raw };
 }
 
 const OWNER_SELECTION = selectOwners();
@@ -108,8 +112,12 @@ const SETTINGS = {
     return Number.isFinite(n) && n > 0 ? n : 0;
   })(),
 
+  // Which slice of time to audit: "yesterday", "today", or a number of days.
+  AUDIT_WINDOW: process.env.AUDIT_WINDOW_INPUT || "yesterday",
+
   // Only audit this lead stage (null = every live stage).
   ONLY_STAGE: STAGE_SELECTION.stage,
+  ONLY_STAGE_BLANK: STAGE_SELECTION.blank,
   INVALID_STAGE: STAGE_SELECTION.invalid,
   ALL_STAGES,
 
@@ -158,6 +166,12 @@ const SETTINGS = {
   CHECK_OCCUPATION: false,     // blank occupation (off — it was noisy)
   CHECK_CALL_DESCRIPTION: true,// connected call with no description logged
   CHECK_WHATSAPP_SPELLING: false,// spelling mistakes in the WhatsApp follow-up (OFF)
+
+  // SAFETY NET: if a whole run reads ZERO WhatsApp messages across every contact,
+  // that almost certainly means we cannot see them (as happened before) rather
+  // than nobody using WhatsApp. In that case all "no WhatsApp logged" findings are
+  // dropped and a warning is printed, so consultants are never wrongly accused.
+  WHATSAPP_SANITY_NET: true,
 
   // Ask the consultant to call when the last logged call is this many calendar
   // days old. 2 = today and yesterday are fine, 2 days ago or older is not.
