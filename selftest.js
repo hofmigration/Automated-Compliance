@@ -103,6 +103,14 @@ const SCENARIOS = [
   ["whatsapp sent late is flagged",
     good({ calls: [{ outcome: "No answer", when: now - 4 * DAY, note: "" }], whatsapps: [{ when: now, body: "Hello sir" }] }), "after the call"],
 
+  // --- WhatsApp that IS logged must be recognised (Rahima Nabili case) ---
+  ["whatsapp logged after a no-answer call is accepted",
+    good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
+           whatsapps: [{ when: now - 3600000, body: "[14:08] Rahima Nabili: Hello Mr. Saqib" }] }), "!no WhatsApp"],
+  ["several whatsapps logged, newest after the call, accepted",
+    good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
+           whatsapps: [{ when: now - 3600000, body: "Upload complete" }, { when: now - 20 * DAY, body: "Hello" }] }), "!no WhatsApp"],
+
   // --- broken lookups must never accuse anyone ---
   ["broken call lookup stays silent", good({ available: { ...OK, calls: false }, calls: [] }), null],
   ["broken task lookup stays silent", good({ available: { ...OK, tasks: false }, tasks: [] }), null],
