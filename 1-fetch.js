@@ -19,10 +19,18 @@ const STANDARD_DISPOSITIONS = {
   "17b47fee-58de-441e-a44c-c6300d46f273": "Wrong number",
 };
 
-function yesterdayWindow() {
+// The audit window, chosen at run time (see config.AUDIT_WINDOW).
+//   "yesterday" -> yesterday only        "today" -> today so far
+//   a number N  -> the last N days, including today
+function auditWindow() {
   const off = SETTINGS.TZ_OFFSET_HOURS * 3600 * 1000;
   const n = new Date(Date.now() + off);
   const startToday = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()) - off;
+  const w = String(SETTINGS.AUDIT_WINDOW || "yesterday").toLowerCase();
+  if (w === "today") return { startMs: startToday, endMs: Date.now() };
+  if (w === "yesterday") return { startMs: startToday - 86400000, endMs: startToday };
+  const days = parseInt(w, 10);
+  if (Number.isFinite(days) && days > 0) return { startMs: startToday - days * 86400000, endMs: Date.now() };
   return { startMs: startToday - 86400000, endMs: startToday };
 }
 
@@ -36,11 +44,12 @@ async function dispositionMap() {
 }
 
 async function fetchContacts() {
-  const { startMs, endMs } = yesterdayWindow();
+  const { startMs, endMs } = auditWindow();
   const out = []; let after;
   const filters = [{ propertyName: "hubspot_owner_id", operator: "IN", values: OWNER_IDS }];
   // when a single lead stage is chosen, ask HubSpot for just that stage
-  if (SETTINGS.ONLY_STAGE) filters.push({ propertyName: "lead_stage", operator: "EQ", value: SETTINGS.ONLY_STAGE });
+  if (SETTINGS.ONLY_STAGE_BLANK) filters.push({ propertyName: "lead_stage", operator: "NOT_HAS_PROPERTY" });
+  else if (SETTINGS.ONLY_STAGE) filters.push({ propertyName: "lead_stage", operator: "EQ", value: SETTINGS.ONLY_STAGE });
   for (let page = 0; page < 200; page++) {
     const d = await hub("POST", "/crm/v3/objects/contacts/search", {
       filterGroups: [{ filters }],
@@ -70,7 +79,7 @@ async function attachEngagements(c, dispoMap) {
     batchRead("calls", callA.ids, ["hs_call_body", "hs_call_title", "hs_call_disposition", "hs_timestamp"]),
     batchRead("emails", emailA.ids, ["hs_email_subject", "hs_email_text", "hs_email_html", "hs_timestamp", "hs_email_direction"]),
     batchRead("tasks", taskA.ids, ["hs_task_subject", "hs_task_status", "hs_timestamp"]),
-    batchRead("communications", commA.ids, ["hs_communication_channel_type", "hs_communication_body", "hs_timestamp"]),
+    batchRead("communications", commA.ids, ["hs_communication_channel_type", "hs_communication_body", "hs_body_preview", "hs_timestamp"]),
   ]);
   const calls = callR.records, emails = emailR.records, tasks = taskR.records, comms = commR.records;
   // did each lookup actually work? checks must stay quiet when it did not
@@ -81,9 +90,24 @@ async function attachEngagements(c, dispoMap) {
     whatsapps: commA.ok && commR.ok,
     deals: dealA.ok,
   };
+  // Classify WhatsApp TOLERANTLY. The old strict equality on the channel type threw
+  // away every record whenever that property came back empty or worded differently,
+  // which is why real "Logged WhatsApp message" activities read as "none logged".
+  const channelSeen = {};
+  const wa = comms.filter((x) => {
+    const ch = String(x.properties.hs_communication_channel_type || "").trim().toUpperCase();
+    channelSeen[ch || "(blank)"] = (channelSeen[ch || "(blank)"] || 0) + 1;
+    if (/WHATS/.test(ch)) return true;      // WHATSAPP, WHATS_APP, etc
+    if (!ch) return true;                   // channel unknown -> still count it
+    if (/SMS|LINKEDIN/.test(ch)) return false;
+    return true;
+  });
+
   const p = c.properties;
   return {
     available,
+    channelSeen,
+    commCount: comms.length,
     dealCount: dealA.ids.length,
     hasDeal: dealA.ok && dealA.ids.length > 0,
     id: c.id,
@@ -99,8 +123,11 @@ async function attachEngagements(c, dispoMap) {
     })),
     emails: newestFirst(emails.filter((e) => (e.properties.hs_email_direction || "") !== "INCOMING_EMAIL")).map((x) => x.properties),
     tasks: tasks.map((x) => x.properties),
-    whatsapps: newestFirst(comms.filter((x) => String(x.properties.hs_communication_channel_type || "").toUpperCase() === "WHATSAPP")).map((x) => ({ when: Date.parse(x.properties.hs_timestamp || 0), body: strip(x.properties.hs_communication_body) })),
+    whatsapps: newestFirst(wa).map((x) => ({
+      when: Date.parse(x.properties.hs_timestamp || 0),
+      body: strip(x.properties.hs_communication_body || x.properties.hs_body_preview),
+    })),
   };
 }
 
-module.exports = { fetchContacts, attachEngagements, dispositionMap, preflight, TERMINAL };
+module.exports = { fetchContacts, attachEngagements, dispositionMap, preflight, auditWindow, TERMINAL };
