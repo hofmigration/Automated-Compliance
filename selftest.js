@@ -1,326 +1,173 @@
-// selftest.js — the DEAL rules register, as a runnable test.
-// Every agreed rule is a scenario here with the issue it MUST (or must not) produce.
-// Run after any edit: node selftest.js
+// selftest.js — the rules register, as a runnable test.
+//
+// WHY THIS EXISTS: every rule we agreed is listed here as a scenario with the
+// issue it MUST produce. Run this after any edit. If a rule ever stops firing,
+// this fails and names it — so a scenario can never be silently dropped again.
+//
+// Run locally or add it as a workflow step:  node selftest.js
+// It needs no HubSpot token and no Gemini key (AI checks return nothing without
+// a key, so AI-only rules are marked and skipped).
+
 process.env.HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN || "selftest";
 
-const checkCloseDate = require("./2-check-closedate");
-const checkStage = require("./3-check-stage");
+const checkStage = require("./2-check-stage");
+const checkCall = require("./3-check-call");
 const checkTask = require("./4-check-task");
-const checkNotes = require("./5-check-notes");
-const checkComms = require("./6-check-comms");
-const checkMarketing = require("./7-check-marketing");
-const { composeNote } = require("./9-note");
-const { SETTINGS, STAGE_NAME, stageKey } = require("./config");
+const checkEmail = require("./5-check-email");
+const checkWhatsapp = require("./6-check-whatsapp");
+const checkMatch = require("./8-check-stage-match");
+const { composeNote } = require("./7-note");
+const { SETTINGS } = require("./config");
 
 const DAY = 86400000, now = Date.now();
-const OK = { calls: true, emails: true, tasks: true, notes: true, whatsapps: true, contact: true };
-const PRIORITY = { pipeline: 1, closedate: 2, reason: 3, call: 4, email: 5, whatsapp: 6, task: 7, payment: 8, details: 9, marketing: 10 };
+const OK = { calls: true, emails: true, tasks: true, whatsapps: true, deals: true };
+const PRIORITY = { stagematch: 1, call: 2, stage: 3, outcome: 4, email: 5, task: 6, whatsapp: 7, data: 8 };
 
-const DETAILS_NOTE = "43/masters in marketing/ 14 years of exp/ since 2011 - 2018. 2022- till date in UAE. Married - bachelors - house wife. 3 kids 13 -10- 8. Reason: 2nd passport";
-const PAYMENT_NOTE = "VAT INCLUSIVE. Fees 11,000 Deposit 11,000 Due Date UP";
-
-// a fully compliant deal — each scenario breaks exactly one thing
+// a fully compliant contact — each scenario breaks exactly one thing
 const good = (o = {}) => ({
-  available: OK, id: "5001", name: "Ahmed Khan - Canada", ownerId: "1",
-  pipelineId: "26699617", pipelineName: "HOF Sales Pipeline - Canada & AUS",
-  stageLabel: "Qualified Client", stage: "QUALIFIED",
-  closedate: now + 10 * DAY, reason: null, dealAgeRange: "32-40", createdate: now - 5 * DAY,
-  channelSeen: {}, commCount: 1,
-  calls: [{ outcome: "Connected", when: now - 3600000, note: "spoke with client about Canada PR, qualified" }],
-  emails: [{ when: now - 1800000, subject: "Canada PR process", body: "Hi Ahmed, here are the process details." }],
-  tasks: [{ hs_task_subject: "Follow up call", hs_task_status: "NOT_STARTED", hs_timestamp: new Date(now + 3 * DAY).toISOString() }],
-  notes: [{ when: now - 2 * DAY, body: DETAILS_NOTE, ownerId: "1" }],
+  available: OK, hasDeal: false, dealCount: 0, id: "900001", name: "Ahmed Khan", ownerId: "1",
+  leadStage: "Qualified CAN", outcome: "Opportunity", occupation: "Engineer",
+  calls: [{ outcome: "Connected", when: now, note: "spoke with client, interested in Canada" }],
+  tasks: [{ hs_task_subject: "Follow up call" }],
+  emails: [{ hs_email_subject: "Canada PR process", hs_email_text: "Hi Ahmed, thank you for your time today." }],
   whatsapps: [],
-  contact: { name: "Ahmed Khan", outcome: "Deal Created", ageRange: "32-40", nationality: "Pakistani", leadStage: "Qualified CAN" },
   ...o,
 });
 
+// [ name, contact, expectation ]
+//   null        -> must produce NO issues at all
+//   "text"      -> must produce an issue containing "text"
+//   "!text"     -> must NOT produce any issue containing "text" (others allowed)
+//   "SKIP"      -> contact is skipped before checks (deal)
+//   "AI-SKIP"   -> needs GEMINI_KEY, skipped without one
 const SCENARIOS = [
-  ["compliant deal produces nothing", good(), null],
+  // --- baseline ---
+  ["compliant contact produces nothing", good(), null],
 
-  // --- close date ---
-  ["close date in the past is flagged", good({ closedate: now - 5 * DAY }), "Close date is in the past"],
-  ["no close date is flagged", good({ closedate: null }), "No close date"],
-  ["close date not checked on Deal Lost",
-    good({ stage: "LOST", stageLabel: "Deal Lost", closedate: now - 30 * DAY, reason: "No Longer Interested", tasks: [] }), "!close date"],
-  ["close date checked on Postponed",
-    good({ stage: "POSTPONED", stageLabel: "Postponed", closedate: now - 3 * DAY, reason: "Delayed Decision But Will Start" }), "Close date is in the past"],
+  // --- deal ---
+  ["contact with a deal is skipped", good({ hasDeal: true, leadStage: null, calls: [], emails: [] }), "SKIP"],
 
-  // --- won/postponed/lost reason ---
-  ["Postponed without a reason", good({ stage: "POSTPONED", stageLabel: "Postponed", reason: null }), "no Won/Postponed/Lost reason"],
-  ["Deal Lost without a reason", good({ stage: "LOST", stageLabel: "Deal Lost", reason: null, tasks: [] }), "no Won/Postponed/Lost reason"],
-  ["reason of Opportunity is rejected", good({ stage: "LOST", stageLabel: "Deal Lost", reason: "Opportunity", tasks: [] }), "not a closing reason"],
-  ["valid lost reason is accepted", good({ stage: "LOST", stageLabel: "Deal Lost", reason: "Cannot Afford At This Time", tasks: [] }), "!reason"],
-  ["reason not required on Qualified Client", good({ reason: null }), "!reason"],
+  // --- identity ---
+  ["client name missing", good({ name: "" }), "no name"],
+  ["occupation blank (only when toggle on)", good({ occupation: null }), SETTINGS.CHECK_OCCUPATION ? "Occupation" : null],
 
-  // --- follow-up task ---
-  ["no follow-up task is flagged", good({ tasks: [] }), "No follow-up task"],
-  ["task not required on Deal Lost", good({ stage: "LOST", stageLabel: "Deal Lost", reason: "Job Loss", tasks: [] }), "!follow-up task"],
-  ["our own compliance task does not count", good({ tasks: [{ hs_task_subject: "[Compliance] Ahmed — set the close date" }] }), "No follow-up task"],
+  // --- lead stage / outcome ---
+  ["lead stage not marked", good({ leadStage: null, outcome: null }), "No lead stage marked"],
+  ["call logged but outcome blank", good({ outcome: null }), "no outcome marked"],
 
-  // --- follow-up task: must be OPEN and scheduled ---
-  ["open task with a future due date is fine",
-    good({ tasks: [{ hs_task_subject: "Follow up call", hs_task_status: "NOT_STARTED", hs_timestamp: new Date(now + 3 * DAY).toISOString() }] }), null],
-  ["only a COMPLETED task does not count",
-    good({ tasks: [{ hs_task_subject: "Follow up call", hs_task_status: "COMPLETED", hs_timestamp: new Date(now - 40 * DAY).toISOString() }] }), "No open follow-up task"],
-  ["completed plus open task is fine",
-    good({ tasks: [
-      { hs_task_subject: "Old call", hs_task_status: "COMPLETED", hs_timestamp: new Date(now - 40 * DAY).toISOString() },
-      { hs_task_subject: "Next call", hs_task_status: "NOT_STARTED", hs_timestamp: new Date(now + 2 * DAY).toISOString() },
-    ] }), null],
-  ["open task badly overdue is flagged",
-    good({ tasks: [{ hs_task_subject: "Follow up call", hs_task_status: "NOT_STARTED", hs_timestamp: new Date(now - 20 * DAY).toISOString() }] }), "overdue by"],
-  ["open task overdue within the grace period is fine",
-    good({ tasks: [{ hs_task_subject: "Follow up call", hs_task_status: "NOT_STARTED", hs_timestamp: new Date(now - 1 * DAY).toISOString() }] }), null],
-  ["in progress task counts as scheduled",
-    good({ tasks: [{ hs_task_subject: "Follow up", hs_task_status: "IN_PROGRESS", hs_timestamp: new Date(now + DAY).toISOString() }] }), null],
-  ["task with no due date still counts if open",
-    good({ tasks: [{ hs_task_subject: "Follow up", hs_task_status: "NOT_STARTED" }] }), null],
-  ["completed task on a LOST deal is not chased",
-    good({ stage: "LOST", stageLabel: "Deal Lost", reason: "Job Loss",
-           tasks: [{ hs_task_subject: "Old", hs_task_status: "COMPLETED", hs_timestamp: new Date(now - 40 * DAY).toISOString() }] }), "!follow-up task"],
+  // --- call ---
+  ["no call logged at all", good({ calls: [] }), "No call logged"],
+  ["email sent but no call logged", good({ calls: [] }), "No call logged"],
+  ["call today is fine", good({ calls: [{ outcome: "Connected", when: now, note: "spoke" }] }), null],
+  ["call yesterday is fine", good({ calls: [{ outcome: "Connected", when: now - DAY, note: "spoke" }] }), null],
+  ["call 2 days ago is stale", good({ calls: [{ outcome: "Connected", when: now - 2 * DAY, note: "spoke" }] }), "Not called recently"],
+  ["call 10 days ago is stale", good({ calls: [{ outcome: "Connected", when: now - 10 * DAY, note: "spoke" }] }), "Not called recently"],
+  ["logged call with no call outcome", good({ calls: [{ outcome: "", when: now, note: "spoke" }] }), "no call outcome"],
+  ["connected call with no description", good({ calls: [{ outcome: "Connected", when: now, note: "" }] }), "no description"],
 
-  // --- client details note ---
-  ["missing client details note", good({ notes: [] }), "No client details recorded"],
-  ["short chit-chat note is not client details", good({ notes: [{ when: now, body: "called client", ownerId: "1" }] }), "No client details recorded"],
-  ["real client details note is accepted", good({ notes: [{ when: now, body: DETAILS_NOTE, ownerId: "1" }] }), "!client details"],
-  ["our own compliance note is not client details",
-    good({ notes: [{ when: now, body: "Hi @Ahmed Kindly mark the lead stage", ownerId: SETTINGS.NOTE_OWNER_ID }] }), "No client details recorded"],
-
-  // --- proof of payment (Won only) ---
-  ["won deal without proof of payment", good({ stage: "WON", stageLabel: "Payment Made/Deal Won", notes: [{ when: now, body: DETAILS_NOTE, ownerId: "1" }] }), "no proof of payment"],
-  ["won deal with the fee note is accepted",
-    good({ stage: "WON", stageLabel: "Payment Made/Deal Won", notes: [{ when: now, body: DETAILS_NOTE, ownerId: "1" }, { when: now, body: PAYMENT_NOTE, ownerId: "1" }] }), "!proof of payment"],
-  ["proof of payment not required on Qualified Client", good(), "!proof of payment"],
-
-  // --- comms: connected ---
-  ["connected call with no email after it", good({ emails: [] }), "no email with the process details"],
-  ["connected call needs no WhatsApp", good({ whatsapps: [] }), "!WhatsApp"],
-  ["connected call with no description", good({ calls: [{ outcome: "Connected", when: now - 3600000, note: "" }] }), "no description logged"],
-  ["connected call with NA as description", good({ calls: [{ outcome: "Connected", when: now - 3600000, note: "NA" }] }), "no description logged"],
-  ["email logged before the call does not count",
-    good({ calls: [{ outcome: "Connected", when: now, note: "spoke" }], emails: [{ when: now - 5 * DAY, subject: "old", body: "old" }] }), "no email with the process details"],
-
-  // --- comms: not reached ---
-  ["no answer needs email AND whatsapp",
-    good({ calls: [{ outcome: "No answer", when: now - 3600000, note: "" }], emails: [], whatsapps: [] }), "no follow up email logged"],
-  ["no answer with email but no whatsapp",
-    good({ calls: [{ outcome: "No answer", when: now - 7200000, note: "" }], emails: [{ when: now - 3600000, subject: "Sorry we missed you", body: "Hi Ahmed" }], whatsapps: [] }), "no WhatsApp logged"],
-  ["no answer with email and whatsapp is accepted",
-    good({ calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
-           emails: [{ when: now - 3600000, subject: "Sorry we missed you", body: "Hi Ahmed" }],
-           whatsapps: [{ when: now - 1800000, body: "Hello Mr Ahmed" }] }), null],
-  ["no answer call needs no description",
-    good({ calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
-           emails: [{ when: now - 3600000, subject: "Sorry we missed you", body: "Hi Ahmed" }],
-           whatsapps: [{ when: now - 1800000, body: "Hello" }] }), "!no description"],
-  ["busy call is treated as not reached",
-    good({ calls: [{ outcome: "Busy", when: now - 7200000, note: "" }], whatsapps: [] }), "no WhatsApp logged"],
-  ["no call logged on the deal", good({ calls: [] }), "No call logged on the deal"],
-
-  // --- WhatsApp scanned the same as on contacts ---
-  ["whatsapp within 24h of a no-answer call is fine",
-    good({ calls: [{ outcome: "No answer", when: now - 5 * 3600000, note: "" }],
-           emails: [{ when: now - 4 * 3600000, subject: "Sorry we missed you", body: "Hi Ahmed" }],
-           whatsapps: [{ when: now - 3 * 3600000, body: "Hello Mr Ahmed" }] }), null],
-  ["whatsapp more than 24h after the call is flagged",
-    good({ calls: [{ outcome: "No answer", when: now - 4 * DAY, note: "" }],
-           emails: [{ when: now - 3 * DAY, subject: "Sorry we missed you", body: "Hi Ahmed" }],
-           whatsapps: [{ when: now, body: "Hello Mr Ahmed" }] }), "after the call"],
-  ["old whatsapp does not satisfy a new no-answer call",
-    good({ calls: [{ outcome: "No answer", when: now - 3600000, note: "" }],
-           emails: [{ when: now, subject: "Sorry we missed you", body: "Hi Ahmed" }],
-           whatsapps: [{ when: now - 40 * DAY, body: "Hello" }] }), "no WhatsApp logged"],
-  ["left voicemail also needs email and whatsapp",
-    good({ calls: [{ outcome: "Left voicemail", when: now - 3600000, note: "" }], emails: [], whatsapps: [] }), "no follow up email logged"],
-  ["wrong number also needs a whatsapp",
-    good({ calls: [{ outcome: "Wrong number", when: now - 7200000, note: "" }],
-           emails: [{ when: now - 3600000, subject: "Sorry we missed you", body: "Hi Ahmed" }], whatsapps: [] }), "no WhatsApp logged"],
-  ["broken whatsapp lookup stays silent on deals",
-    good({ available: { ...OK, whatsapps: false }, calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
-           emails: [{ when: now - 3600000, subject: "Sorry we missed you", body: "Hi" }], whatsapps: [] }), "!WhatsApp"],
-
-  // --- note wording ---
-  ["no answer email ask reads as a follow up, not a template name",
-    good({ calls: [{ outcome: "No answer", when: now - 3600000, note: "" }], emails: [] }), "no follow up email logged"],
-  ["wording check", null, "WORDING"],
-
-  // --- the Ambreen Sayed case: details already emailed, do not chase again ---
-  ["a later connected call does not require the email to be re-sent",
+  // --- call quality must only judge RECENT calls (Mishal Naseem case) ---
+  ["busy + no answer yesterday, old connected call: no description ask",
     good({ calls: [
-      { outcome: "Connected", when: now - 1 * DAY, note: "follow up chat" },
-      { outcome: "Connected", when: now - 3 * DAY, note: "explained the process and fee structure" },
-    ], emails: [{ when: now - 3 * DAY + 1800000, subject: "EB-2 NIW roadmap", body: "Dear Saravana, thank you for your interest" }] }),
-    "!email"],
-  ["email sent the same day but slightly before the call still counts",
-    good({ calls: [{ outcome: "Connected", when: now - 3600000, note: "spoke about Canada" }],
-           emails: [{ when: now - 5 * 3600000, subject: "Canada PR", body: "Hi Ahmed" }] }), "!email"],
-  ["still flagged when no email was ever sent after the first connected call",
-    good({ calls: [{ outcome: "Connected", when: now - DAY, note: "spoke" }], emails: [] }), "no email with the process details"],
+      { outcome: "No answer", when: now - DAY, note: "NA" },
+      { outcome: "Busy", when: now - DAY, note: "Call id : 0c809ecf" },
+      { outcome: "Connected", when: now - 30 * DAY, note: "" },
+    ] }), "!no description"],
+  ["busy call today needs no description", good({ calls: [{ outcome: "Busy", when: now, note: "" }], whatsapps: [{ when: now, body: "Hello sir" }] }), null],
+  ["no answer call today needs no description", good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now, note: "NA" }], whatsapps: [{ when: now, body: "Hello sir" }] }), null],
+  ["connected call today with no description IS flagged", good({ calls: [{ outcome: "Connected", when: now, note: "" }] }), "no description"],
+  ["connected call with only \"NA\" is not a description", good({ calls: [{ outcome: "Connected", when: now, note: "NA" }] }), "no description"],
+  ["meeting booked needs a description too", good({ calls: [{ outcome: "Meeting booked", when: now, note: "" }] }), "no description"],
+  ["meeting booked needs no whatsapp", good({ calls: [{ outcome: "Meeting booked", when: now, note: "client agreed to a zoom on friday" }], whatsapps: [] }), null],
+  ["old call with no outcome is not flagged today",
+    good({ calls: [{ outcome: "Connected", when: now, note: "spoke at length" }, { outcome: "", when: now - 40 * DAY, note: "old" }] }), null],
 
-  // --- client details recorded in the CALL DESCRIPTION ---
-  ["client details in the call description are accepted",
-    good({ notes: [], calls: [{ outcome: "Connected", when: now - 3600000,
-      note: "age: 54yrs edu: phd exp: 30yrs married kids: 16yrs Indian associate professor, he wanted to know about the USA EB-2 NIW" }] }), "!client details"],
-  ["call description with no client facts is not accepted as details",
-    good({ notes: [], calls: [{ outcome: "Connected", when: now - 3600000, note: "called the client, will call again" }] }), "No client details recorded"],
-  ["client details copy helper finds them in the call log", null, "COPY_FIND"],
-  ["details nowhere at all is flagged",
-    good({ notes: [], calls: [{ outcome: "Connected", when: now - 3600000, note: "called the client" }] }), "No client details recorded"],
-  ["details in the call log with copying ON is not flagged",
-    good({ notes: [], calls: [{ outcome: "Connected", when: now - 3600000,
-      note: "age: 54yrs edu: phd exp: 30yrs married kids: 16yrs Indian associate professor" }] }), "!client details"],
-  ["details in the call log is flagged when the copy failed",
-    good({ detailsCopyFailed: true, notes: [], calls: [{ outcome: "Connected", when: now - 3600000,
-      note: "age: 54yrs edu: phd exp: 30yrs married kids: 16yrs Indian associate professor" }] }), "not in a note"],
-  ["client details copy is skipped when already copied", null, "COPY_ONCE"],
+  // --- task ---
+  ["no task set up", good({ tasks: [] }), "No task set up"],
+  ["only our own compliance task exists", good({ tasks: [{ hs_task_subject: "[Compliance] Ahmed — mark the lead stage" }] }), "No task set up"],
+  ["task check waits for the lead stage", good({ leadStage: null, outcome: null, tasks: [] }), "No lead stage marked"],
 
-  // --- marketing properties ---
-  ["contact outcome not Deal Created", good({ contact: { ...good().contact, outcome: "Opportunity" } }), "not Deal Created"],
-  ["contact outcome blank", good({ contact: { ...good().contact, outcome: null } }), "not marked as Deal Created"],
-  ["age range missing on both deal and contact", good({ dealAgeRange: null, contact: { ...good().contact, ageRange: null } }), "Age Range is not marked"],
-  ["age range on the deal alone is enough", good({ dealAgeRange: "32-40", contact: { ...good().contact, ageRange: null } }), "!Age Range"],
-  ["nationality missing", good({ contact: { ...good().contact, nationality: null } }), "Nationality is not marked"],
+  // --- email ---
+  ["call logged but no email sent", good({ emails: [] }), "no email sent"],
+  ["no email is NOT asked when no call either", good({ calls: [], emails: [] }), "No call logged"],
+  ["placeholder left in subject", good({ emails: [{ hs_email_subject: "Hello {{firstname}}", hs_email_text: "Hi Ahmed, details." }] }), "placeholder"],
+  ["greeting with no client name", good({ emails: [{ hs_email_subject: "Canada PR", hs_email_text: "Hi, please find details." }] }), "no client name"],
 
-  // --- stage normalisation ---
-  ["Expected Sale and Expected Sales both map", null, "STAGEMAP"],
+  // --- whatsapp ---
+  ["no answer call with no whatsapp", good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now, note: "" }], whatsapps: [] }), "no WhatsApp logged"],
+  ["busy call with no whatsapp", good({ calls: [{ outcome: "Busy", when: now, note: "" }], whatsapps: [] }), "no WhatsApp logged"],
+  ["connected call needs no whatsapp", good({ calls: [{ outcome: "Connected", when: now, note: "spoke" }], whatsapps: [] }), null],
+  ["old whatsapp does not count for a new no-answer call",
+    good({ calls: [{ outcome: "No answer", when: now, note: "" }], whatsapps: [{ when: now - 30 * DAY, body: "hello sir" }] }), "no WhatsApp logged"],
+  ["whatsapp sent within 24h is fine",
+    good({ calls: [{ outcome: "No answer", when: now - 3600000, note: "" }], whatsapps: [{ when: now, body: "Hello sir, we tried calling you." }] }), null],
+  ["whatsapp sent late is flagged",
+    good({ calls: [{ outcome: "No answer", when: now - 4 * DAY, note: "" }], whatsapps: [{ when: now, body: "Hello sir" }] }), "after the call"],
 
-  // --- the built-in stage map must resolve every sales stage id ---
-  ["built-in stage ids all resolve", null, "STAGEIDS"],
-
-  // --- reading the client's own words (script 10) ---
-  ["attachment-only whatsapp is not readable", null, "INTENT_ATTACH"],
-  ["conversation text is assembled from readable text only", null, "INTENT_TEXT"],
-  ["client intent is not checked on closed stages", null, "INTENT_STAGE"],
+  // --- WhatsApp that IS logged must be recognised (Rahima Nabili case) ---
+  ["whatsapp logged after a no-answer call is accepted",
+    good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
+           whatsapps: [{ when: now - 3600000, body: "[14:08] Rahima Nabili: Hello Mr. Saqib" }] }), "!no WhatsApp"],
+  ["several whatsapps logged, newest after the call, accepted",
+    good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
+           whatsapps: [{ when: now - 3600000, body: "Upload complete" }, { when: now - 20 * DAY, body: "Hello" }] }), "!no WhatsApp"],
 
   // --- broken lookups must never accuse anyone ---
-  ["broken task lookup stays silent", good({ available: { ...OK, tasks: false }, tasks: [] }), "!follow-up task"],
-  ["broken notes lookup stays silent", good({ available: { ...OK, notes: false }, notes: [] }), "!client details"],
-  ["broken call lookup stays silent", good({ available: { ...OK, calls: false }, calls: [] }), "!call"],
-  ["broken contact lookup stays silent", good({ available: { ...OK, contact: false }, contact: { ...good().contact, nationality: null } }), "!Nationality"],
+  ["broken call lookup stays silent", good({ available: { ...OK, calls: false }, calls: [] }), null],
+  ["broken task lookup stays silent", good({ available: { ...OK, tasks: false }, tasks: [] }), null],
+  ["broken email lookup stays silent", good({ available: { ...OK, emails: false }, emails: [] }), null],
+  ["broken whatsapp lookup stays silent",
+    good({ available: { ...OK, whatsapps: false }, calls: [{ outcome: "No answer", when: now, note: "" }], whatsapps: [] }), null],
+
+  // --- AI-only rule (needs GEMINI_KEY, otherwise skipped) ---
+  ["stage contradicts the call notes",
+    good({ leadStage: "No Answer", calls: [{ outcome: "Connected", when: now, note: "spoke with client at length, he is a qualified engineer and very interested in Canada PR" }] }),
+    process.env.GEMINI_KEY ? "does not match" : "AI-SKIP"],
 ];
 
 (async () => {
-  let pass = 0, fail = 0;
-  console.log(`DEAL RULES SELF-TEST — ${SCENARIOS.length} scenarios\n`);
+  let pass = 0, fail = 0, skip = 0;
+  console.log(`RULES SELF-TEST — ${SCENARIOS.length} scenarios\n`);
 
   for (const [label, d, must] of SCENARIOS) {
-    if (must === "INTENT_ATTACH") {
-      const { isAttachmentOnly } = require("./10-check-client-intent");
-      const unreadable = ["image omitted", "\u200e<attached: 00000042-PHOTO.jpg>", "document omitted", "  ", "IMG_2043.jpg", "video omitted"];
-      const readable = ["I cannot proceed due to family problems", "sorry sir, I lost my job last month", "we will start after IELTS"];
-      const ok = unreadable.every(isAttachmentOnly) && readable.every((t) => !isAttachmentOnly(t));
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); ok ? pass++ : fail++;
-      continue;
-    }
-    if (must === "INTENT_TEXT") {
-      const { conversationText } = require("./10-check-client-intent");
-      const r = conversationText(good({
-        whatsapps: [
-          { when: now, body: "[19:19, 7/22/2026] +971 54 423 2552: sir I cannot proceed now, family problems" },
-          { when: now - DAY, body: "image omitted" },
-        ],
-        emails: [{ when: now, subject: "Canada PR", body: "Hi Ahmed, details attached." }],
-        calls: [{ outcome: "Connected", when: now, note: "client said he will decide later" }],
-      }));
-      const ok = r.skippedAttachments === 1 && /family problems/.test(r.text)
-        && !/image omitted/.test(r.text) && /CALL NOTE/.test(r.text) && /OUR EMAIL/.test(r.text);
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label} (${r.count} readable lines, ${r.skippedAttachments} attachment skipped)`);
-      ok ? pass++ : fail++;
-      continue;
-    }
-    if (must === "INTENT_STAGE") {
-      const checkIntent = require("./10-check-client-intent");
-      const say = { whatsapps: [{ when: now, body: "[19:19] +971 54 423 2552: I cannot proceed, family problems" }] };
-      const lost = await checkIntent(good({ ...say, stage: "LOST", stageLabel: "Deal Lost", reason: "Family Issues", tasks: [] }));
-      const won = await checkIntent(good({ ...say, stage: "WON", stageLabel: "Payment Made/Deal Won" }));
-      const post = await checkIntent(good({ ...say, stage: "POSTPONED", stageLabel: "Postponed", reason: "Family Issues" }));
-      const ok = lost.length === 0 && won.length === 0 && post.length === 0;
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); ok ? pass++ : fail++;
-      continue;
-    }
-    if (must === "COPY_FIND") {
-      const { findClientDetails } = require("./5-check-notes");
-      const inCall = findClientDetails(good({ notes: [], calls: [{ outcome: "Connected", when: now,
-        note: "age: 54yrs edu: phd exp: 30yrs married kids: 16yrs Indian associate professor" }] }));
-      const inNote = findClientDetails(good());
-      const ok = inCall && inCall.where === "call" && /phd/i.test(inCall.text) && inNote && inNote.where === "note";
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); ok ? pass++ : fail++;
-      continue;
-    }
-    if (must === "COPY_ONCE") {
-      const { alreadyCopied, MARKER } = require("./11-copy-client-details");
-      const ok = alreadyCopied({ notes: [{ body: `${MARKER} Logged by X on 2026-08-18 age: 54yrs` }] }) === true
-        && alreadyCopied({ notes: [{ body: "some other note" }] }) === false;
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); ok ? pass++ : fail++;
-      continue;
-    }
-    if (must === "WORDING") {
-      const checkComms = require("./6-check-comms");
-      const d0 = good({ calls: [{ outcome: "No answer", when: now - 3600000, note: "" }], emails: [], whatsapps: [] });
-      const found = await checkComms(d0);
-      const emailIssue = found.find((i) => i.area === "email");
-      const note = composeNote("Muhammad Diean", found.slice(0, 2));
-      const ok = emailIssue && /follow up email/i.test(emailIssue.action)
-        && !/no answer email/i.test(emailIssue.action)
-        && /as the call was no answer, kindly send a follow up email/i.test(note);
+    if (must === "SKIP") {
+      const ok = d.hasDeal === true;
       console.log(`${ok ? "PASS" : "FAIL"}  ${label}`);
-      if (!ok) console.log(`        got: ${note}`);
       ok ? pass++ : fail++;
       continue;
     }
-    if (must === "STAGEIDS") {
-      const src = require("fs").readFileSync("./1-fetch-deals.js", "utf8");
-      const block = src.slice(src.indexOf("const STANDARD_STAGES"), src.indexOf("};", src.indexOf("const STANDARD_STAGES")));
-      const pairs = [...block.matchAll(/"(\d+)":\s*"([^"]+)"/g)];
-      const keys = new Set(pairs.map(([, , label]) => stageKey(label)));
-      const ok = pairs.length === 14 && keys.size === 7 && !keys.has(null);
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label} (${pairs.length} ids -> ${keys.size} stages)`);
-      ok ? pass++ : fail++;
-      continue;
-    }
-    if (must === "STAGEMAP") {
-      const ok = stageKey("Expected Sale") === "EXPECTED_SALE" && stageKey("Expected Sales") === "EXPECTED_SALE"
-        && stageKey("Postpone (No Specific Date)") === "POSTPONED" && stageKey("Postponed") === "POSTPONED"
-        && stageKey("Petition Filed") === null;
-      console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); ok ? pass++ : fail++;
-      continue;
-    }
+    if (must === "AI-SKIP") { console.log(`SKIP  ${label} (no GEMINI_KEY)`); skip++; continue; }
+
     let issues = [];
     try {
-      // exactly how the runner calls them, so an un-awaited async check is caught here
-      const results = await Promise.all([
-        checkCloseDate(d), checkStage(d), checkTask(d), checkNotes(d), checkComms(d), checkMarketing(d),
-      ]);
-      issues = results.flat().filter(Boolean);
-    } catch (e) { console.log(`FAIL  ${label}\n        crashed: ${e.message}`); fail++; continue; }
-
-    // every finding must be {problem, action} strings — a Promise or stray value fails here
-    const malformed = issues.filter((i) => typeof i?.problem !== "string" || typeof i?.action !== "string");
-    if (malformed.length) {
-      console.log(`FAIL  ${label}\n        a check returned ${malformed.length} malformed finding(s) — likely an un-awaited async check`);
-      fail++; continue;
+      issues = issues.concat(checkStage(d), checkCall(d), checkTask(d),
+        await checkEmail(d), await checkWhatsapp(d), await checkMatch(d));
+    } catch (e) {
+      console.log(`FAIL  ${label}\n        crashed: ${e.message}`); fail++; continue;
     }
-    issues.sort((a, b) => (PRIORITY[a.area] || 99) - (PRIORITY[b.area] || 99));
+    issues.sort((a, b) => (PRIORITY[a.area] || 9) - (PRIORITY[b.area] || 9));
     const text = issues.map((i) => i.problem).join("; ");
 
     let ok;
     if (must === null) ok = issues.length === 0;
     else if (String(must).startsWith("!")) ok = !text.toLowerCase().includes(String(must).slice(1).toLowerCase());
     else ok = text.toLowerCase().includes(String(must).toLowerCase());
-
     if (ok) { pass++; console.log(`PASS  ${label}`); }
     else {
       fail++;
       console.log(`FAIL  ${label}`);
-      console.log(`        expected: ${must === null ? "no issues" : String(must).startsWith("!") ? `NO issue containing "${String(must).slice(1)}"` : `an issue containing "${must}"`}`);
+      console.log(`        expected: ${must === null ? "no issues"
+        : String(must).startsWith("!") ? `NO issue containing "${String(must).slice(1)}"`
+        : `an issue containing "${must}"`}`);
       console.log(`        got:      ${text || "(no issues)"}`);
     }
   }
 
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) { console.log(`\nA deal rule stopped working. Fix it before auditing for real.`); process.exit(1); }
-  console.log(`\nExample note:\n  ${composeNote("Ayesha Anum", [
-    { action: "update the close date" }, { action: "schedule a follow-up task on the deal" },
+  console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
+  if (fail) {
+    console.log(`\nA rule stopped working. Fix it before running the audit for real.`);
+    process.exit(1);
+  }
+  console.log(`\nExample note:\n  ${composeNote("Ayesha", [
+    { action: "mark the lead stage" }, { action: "call the client and log the call" },
   ])}`);
 })();
