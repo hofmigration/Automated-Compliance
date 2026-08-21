@@ -112,8 +112,16 @@ const SETTINGS = {
     return Number.isFinite(n) && n > 0 ? n : 0;
   })(),
 
-  // Which slice of time to audit: "yesterday", "today", or a number of days.
-  AUDIT_WINDOW: process.env.AUDIT_WINDOW_INPUT || "yesterday",
+  // HOW FAR BACK TO SCAN, in HOURS. Type any number in the workflow: 1, 18, 24, 72...
+  // 0 (or "any") means no time window at all.
+  AUDIT_HOURS: (() => {
+    const raw = String(process.env.HOURS_INPUT ?? "24").trim().toLowerCase();
+    if (!raw) return 24;                               // box left empty -> safe default
+    if (raw === "any" || raw === "0") return 0;        // only an explicit 0/any = no window
+    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) && n > 0 ? n : 24;       // anything unreadable -> 24h
+  })(),
+  AUDIT_HOURS_RAW: String(process.env.HOURS_INPUT ?? "24").trim(),
 
   // Only audit this lead stage (null = every live stage).
   ONLY_STAGE: STAGE_SELECTION.stage,
