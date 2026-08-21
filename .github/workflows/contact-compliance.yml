@@ -3,7 +3,7 @@ name: Contact Compliance
 on:
   schedule:
     # 05:00 UTC = 10:00 AM PKT. Scheduled runs use the fallbacks in config.js
-    # (safe dry run, all consultants, all stages, no limit).
+    # (safe dry run, last 24 hours, all consultants, all stages, no limit).
     - cron: "0 5 * * *"
   workflow_dispatch:
     inputs:
@@ -15,6 +15,11 @@ on:
         options:
           - "true"
           - "false"
+      hours_back:
+        description: "How many HOURS back to scan. Type any number: 1, 18, 24, 72. Use 0 for any time (no window)."
+        required: true
+        default: "24"
+        type: string
       lead_stage:
         description: "Lead stage to audit"
         required: true
@@ -22,6 +27,7 @@ on:
         default: "all"
         options:
           - "all"
+          - "(not marked)"
           - "USA NIW"
           - "Qualified CAN"
           - "Qualified AUS"
@@ -291,6 +297,7 @@ jobs:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           RESEND_KEY: ${{ secrets.RESEND_KEY }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          HOURS_INPUT: ${{ inputs.hours_back }}
           LEAD_STAGE_INPUT: ${{ inputs.lead_stage }}
           LIMIT_INPUT: ${{ inputs.limit }}
           CONSULTANTS_INPUT: "${{ inputs.consultant_1 }}|${{ inputs.consultant_2 }}|${{ inputs.consultant_3 }}|${{ inputs.consultant_4 }}"
