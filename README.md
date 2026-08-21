@@ -39,7 +39,7 @@ Numbered names matter — the runner loads them by name. Don't rename them.
 | Dropdown | Choices |
 |---|---|
 | Dry run | `true` = safe test (writes nothing) · `false` = LIVE |
-| Time window | Yesterday · Today so far · Last 3 / 7 / 14 / 30 days |
+| Hours back | **Type any number of hours**: 1, 18, 24, 72. Use 0 for any time (no window). Default 24. |
 | Lead stage | `all` · **`(not marked)`** · or one of the 21 stages |
 | How many contacts | `all` · 25 / 50 / 100 / 250 / 500 / 1000 |
 | Consultant + 3 more | `all` · any of the 47 names · `- none -` |
