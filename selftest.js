@@ -111,6 +111,9 @@ const SCENARIOS = [
     good({ leadStage: "No Answer", calls: [{ outcome: "No answer", when: now - 7200000, note: "" }],
            whatsapps: [{ when: now - 3600000, body: "Upload complete" }, { when: now - 20 * DAY, body: "Hello" }] }), "!no WhatsApp"],
 
+  // --- the hours box ---
+  ["hours box is read correctly", null, "HOURS"],
+
   // --- broken lookups must never accuse anyone ---
   ["broken call lookup stays silent", good({ available: { ...OK, calls: false }, calls: [] }), null],
   ["broken task lookup stays silent", good({ available: { ...OK, tasks: false }, tasks: [] }), null],
@@ -136,6 +139,23 @@ const SCENARIOS = [
       continue;
     }
     if (must === "AI-SKIP") { console.log(`SKIP  ${label} (no GEMINI_KEY)`); skip++; continue; }
+    if (must === "HOURS") {
+      const cases = [["1", 1], ["18", 18], ["24", 24], ["72", 72], ["0", 0], ["any", 0],
+                     ["", 24], ["abc", 24], ["24 hours", 24], [undefined, 24]];
+      let ok = true, detail = [];
+      for (const [input, expect] of cases) {
+        for (const k of Object.keys(require.cache)) delete require.cache[k];
+        if (input === undefined) delete process.env.HOURS_INPUT; else process.env.HOURS_INPUT = input;
+        const got = require("./config").SETTINGS.AUDIT_HOURS;
+        if (got !== expect) { ok = false; detail.push(`${JSON.stringify(input)} -> ${got}, expected ${expect}`); }
+      }
+      delete process.env.HOURS_INPUT;
+      for (const k of Object.keys(require.cache)) delete require.cache[k];
+      console.log(`${ok ? "PASS" : "FAIL"}  ${label}`);
+      if (!ok) console.log("        " + detail.join("; "));
+      ok ? pass++ : fail++;
+      continue;
+    }
 
     let issues = [];
     try {
