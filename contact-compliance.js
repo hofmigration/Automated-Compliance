@@ -10,7 +10,7 @@
 
 const { SETTINGS, SELECTED_OWNERS, UNMATCHED_NAMES, ALL_OWNERS_SELECTED } = require("./config");
 const { hub } = require("./0-hubspot");
-const { fetchContacts, attachEngagements, dispositionMap, preflight, TERMINAL } = require("./1-fetch");
+const { fetchContacts, attachEngagements, dispositionMap, preflight, auditWindow, TERMINAL } = require("./1-fetch");
 const checkStage = require("./2-check-stage");
 const checkCall = require("./3-check-call");
 const checkTask = require("./4-check-task");
@@ -59,7 +59,13 @@ async function main() {
   }
   if (UNMATCHED_NAMES.length) console.log(`NOTE: no consultant matched: ${UNMATCHED_NAMES.join(", ")}`);
   console.log(`Consultants: ${ALL_OWNERS_SELECTED ? `ALL (${SELECTED_OWNERS.length})` : SELECTED_OWNERS.map((o) => o.name).join(", ")}`);
-  console.log(`Window:      ${SETTINGS.AUDIT_WINDOW === "yesterday" ? "yesterday" : SETTINGS.AUDIT_WINDOW === "today" ? "today so far" : `last ${SETTINGS.AUDIT_WINDOW} days`}`);
+  if (SETTINGS.AUDIT_HOURS_RAW && !/^(any|0)$/i.test(SETTINGS.AUDIT_HOURS_RAW) && !Number.isFinite(parseFloat(SETTINGS.AUDIT_HOURS_RAW)))
+    console.log(`NOTE: "${SETTINGS.AUDIT_HOURS_RAW}" is not a number of hours — using 24.`);
+  {
+    const w = auditWindow();
+    const t = (ms) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
+    console.log(`Window:      ${w ? `last ${SETTINGS.AUDIT_HOURS} hour(s)  (${t(w.startMs)} .. ${t(w.endMs)} UTC)` : "any time (no window)"}`);
+  }
   console.log(`Lead stage:  ${SETTINGS.ONLY_STAGE_BLANK ? "(not marked) — contacts with activity but no lead stage" : SETTINGS.ONLY_STAGE || "all live stages"}`);
   console.log(`Limit:       ${SETTINGS.LIMIT === 0 ? "no limit (every contact)" : SETTINGS.LIMIT}`);
 
