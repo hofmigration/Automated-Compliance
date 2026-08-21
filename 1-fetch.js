@@ -19,19 +19,11 @@ const STANDARD_DISPOSITIONS = {
   "17b47fee-58de-441e-a44c-c6300d46f273": "Wrong number",
 };
 
-// The audit window, chosen at run time (see config.AUDIT_WINDOW).
-//   "yesterday" -> yesterday only        "today" -> today so far
-//   a number N  -> the last N days, including today
+// A rolling window of the last N hours, ending now. 0 hours = no window at all.
 function auditWindow() {
-  const off = SETTINGS.TZ_OFFSET_HOURS * 3600 * 1000;
-  const n = new Date(Date.now() + off);
-  const startToday = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()) - off;
-  const w = String(SETTINGS.AUDIT_WINDOW || "yesterday").toLowerCase();
-  if (w === "today") return { startMs: startToday, endMs: Date.now() };
-  if (w === "yesterday") return { startMs: startToday - 86400000, endMs: startToday };
-  const days = parseInt(w, 10);
-  if (Number.isFinite(days) && days > 0) return { startMs: startToday - days * 86400000, endMs: Date.now() };
-  return { startMs: startToday - 86400000, endMs: startToday };
+  const h = SETTINGS.AUDIT_HOURS;
+  if (!h) return null;
+  return { startMs: Date.now() - h * 3600000, endMs: Date.now() };
 }
 
 async function dispositionMap() {
@@ -44,7 +36,7 @@ async function dispositionMap() {
 }
 
 async function fetchContacts() {
-  const { startMs, endMs } = auditWindow();
+  const win = auditWindow();
   const out = []; let after;
   const filters = [{ propertyName: "hubspot_owner_id", operator: "IN", values: OWNER_IDS }];
   // when a single lead stage is chosen, ask HubSpot for just that stage
@@ -59,10 +51,13 @@ async function fetchContacts() {
     });
     let stop = false;
     for (const c of d.results || []) {
-      const lc = c.properties.notes_last_contacted ? Date.parse(c.properties.notes_last_contacted) : 0;
-      if (lc >= endMs) continue;
-      if (lc < startMs) { stop = true; break; }
+      if (win) {
+        const lc = c.properties.notes_last_contacted ? Date.parse(c.properties.notes_last_contacted) : 0;
+        if (lc >= win.endMs) continue;
+        if (lc < win.startMs) { stop = true; break; }
+      }
       out.push(c);
+      if (SETTINGS.LIMIT && out.length >= SETTINGS.LIMIT) { stop = true; break; }
     }
     after = d.paging?.next?.after;
     if (stop || !after) break;
